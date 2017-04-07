@@ -2,7 +2,7 @@
 written by Chris Renshaw
 Created 3/8/2017
 ## Outline of script ###############################
-* input username
+* input username or last name
 * choose retention options
 * mailbox disabled as needed 
 * permissions (Groups) logged / revoked
