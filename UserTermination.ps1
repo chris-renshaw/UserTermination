@@ -87,7 +87,7 @@ Function UserTerm {
                     return
                 }
             }
-
+            $UserNameChosen = $UserAcctCheck.Name
         }
 
         2{
