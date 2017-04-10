@@ -1,22 +1,27 @@
-#Terminate User
-#C Renshaw 12/02/2016
+<#
+## User Termination ################################
+written by Chris Renshaw
+Created 3/8/2017
+
+## Outline of script ###############################
+
+* input username
+* specify any retention 
+* mailbox disabled as needed
+* permissions (Groups) logged / revoked
+* password changed
+* user account disabled
+* checks / creates Graveyard OU as needed
+* drop user into Graveyard OU as needed
+* manager given full acces to email as needed
+* append perms revoked to user description
+
+#> ##################################################
+
 #TAGS User,term,disable
 #UNIVERSAL
 
-<#
-- input username
-- specify any retention
-- mailbox disabled as needed
-- permissions (Groups) logged / revoked
-- password changed
-- user account disabled
-- drop user into Graveyard OU as needed
-- manager given full acces as needed
-- append perms revoked to user description
-#>
-
 Function UserTerm {
-
 
     clear
 
@@ -28,15 +33,21 @@ Function UserTerm {
     $LogFile = @()
     $TermDate = @()
     $ADGroups = @()
+    $DeleteDate = @()
+    $DivisionDetails = @()
+    $DomainName = "DomainName.local" #eg - "domain.com" or "domain.local" // modification of script would be needed for subdomain, eg - sub.domain.com
+    $MailServer = "MAIL.DomainName.local" #eg - "mail-server.domain.com"
+    $LogLocation = "C:\LogFiles"
+    $GraveyardOU = "OU=Disabled Users,OU=Graveyard,DC=DomainName,DC=local"
+    $TermPW = "T3rm3dU5er$" #Password set for disabled, but retained, user account
 
-    
 
     if ($UserCredential -eq $NULL) {
             $UserCredential = Get-Credential
         }
 
 
-    Write-Host "User Account Deletion for ADH.LOCAL" -ForegroundColor Green
+    Write-Host "User Account Deletion" -ForegroundColor Green
     Write-Host "================================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Please fill out the following questions carefully and be sure to check for" -ForegroundColor Yellow
@@ -58,7 +69,7 @@ Function UserTerm {
         1{
             Write-Host ""
             $UserAcctCheck = @()
-            Write-Host "Enter the username to be disabled. (Without ADH\, no wildcards, and not blank)" -ForegroundColor Cyan
+            Write-Host "Enter the username to be disabled. (Without $DomainName\, no wildcards, and not blank)" -ForegroundColor Cyan
             $UserAlias = Read-Host "Username"
             Write-Host ""
             if ($UserAlias -eq "$NULL" -or $UserAlias -eq "*" -or $UserAlias -eq "?") {
@@ -118,17 +129,22 @@ Function UserTerm {
                     }
 
                     else {
-                        Write-Host "Found the following options. Please choose one:" -ForegroundColor Cyan
-                        Write-Host ""
-                        $UserNameMenu = @{}
-                        for ($i=1;$i -le $LastNameChk.count; $i++) {
-                            Write-Host "$i. $($LastNameChk[$i-1])"
-                            $UserNameMenu.Add($i,($LastNameChk[$i-1]))
+                        if ($LastNameChk.Count -gt "1") {
+                            Write-Host "Found the following options. Please choose one:" -ForegroundColor Cyan
+                            Write-Host ""
+                            $UserNameMenu = @{}
+                            for ($i=1;$i -le $LastNameChk.count; $i++) {
+                                Write-Host "$i. $($LastNameChk[$i-1])"
+                                $UserNameMenu.Add($i,($LastNameChk[$i-1]))
+                            }
+                            [int]$NameAns = Read-Host "Confirm"
+                            Write-Host ""
+                            $UserNameChosen = $UserNameMenu.Item($NameAns)
                         }
-                        [int]$NameAns = Read-Host "Confirm"
-                        Write-Host ""
-                        $UserNameChosen = $UserNameMenu.Item($NameAns)
+                        else {
+                            $UserNameChosen = $LastNameChk
 
+                        }
                     }
 
                     $UserAcctCheck = @()
@@ -168,11 +184,11 @@ Function UserTerm {
     } # Stops the script upon incorrect user choice
 
 
-    # Email Retention Verification
+    # Retention Verification
     $UserRetain = @()
     $EmailRetain = @()
     Write-Host ""
-    Write-Host "Will this user's account need to be retained in the ADH Graveyard OU?" -ForegroundColor Cyan
+    Write-Host "Will this user's account need to be retained in the Graveyard OU?" -ForegroundColor Cyan
     $UserRetain = Read-Host "Confirm (Y or N)"
     Write-Host "" 
     if ($UserRetain -ne "Y" -or $UserRetain -ne "y") {
@@ -185,7 +201,8 @@ Function UserTerm {
         $UserRetain = "YES"
         Write-Host ""
         Write-Host "You requested to retain this user's AD account." -ForegroundColor Green
-        Write-Host "Will the email need to be retained and Full-Access given to their manager?" -ForegroundColor Cyan
+
+            Write-Host "Will the email need to be retained and Full-Access given to their manager?" -ForegroundColor Cyan
         Write-Host ""
         $EmailRetain = Read-Host "Confirm (Y or N)"
         Write-Host ""
@@ -199,8 +216,12 @@ Function UserTerm {
             Write-Host "and give the manager Full Access permissions." -ForegroundColor Green
             $EmailRetain = "YES"
         }
+
     }
-    #End Email Retention Verification
+
+
+
+    #End Retention Verification
 
 
     # Summary Verification
@@ -247,7 +268,7 @@ Function UserTerm {
     #Mailbox Logic
     if ($EmailRetain -eq "NO") { # These steps will complete if the mailbox is not to be retained
         Write-Host "<< Disable Mailbox >>" -ForegroundColor Cyan
-        $Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri http://ADH-MAIL.adh.local/PowerShell/ -Authentication Kerberos -Credential $UserCredential
+        $Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri http://$MailServer/PowerShell/ -Authentication Kerberos -Credential $UserCredential
         Import-PSSession $Session -AllowClobber 
         Disable-Mailbox -Identity "$UserAlias" -Confirm:$false
         Write-Host ""
@@ -267,7 +288,7 @@ Function UserTerm {
         #assign Full Access to manager
         $managerDetails = Get-ADUser (Get-ADUser $UserAlias -properties manager).manager -properties displayName
         $managerUserName=$managerDetails.SamAccountName
-        $Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri http://ADH-MAIL.adh.local/PowerShell/ -Authentication Kerberos -Credential $UserCredential
+        $Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri http://$MailServer/PowerShell/ -Authentication Kerberos -Credential $UserCredential
         Import-PSSession $Session -AllowClobber
         Add-MailboxPermission -Identity $UserAlias -User $managerUserName -AccessRights FullAccess -InheritanceType All
         Remove-PSSession $Session
@@ -276,16 +297,35 @@ Function UserTerm {
 
 
     #Log Alias and permissions
-    Write-Host "<< Logging Permission Sets >>" -ForegroundColor Cyan
+    function log($string, $color) {
+        if ($Color -eq $null) {$color = "white"}
+        write-host $string -foregroundcolor $color   
+        $temp = ": " + $string
+        $string = Get-Date -format "yyyy.MM.dd hh:mm:ss tt"
+        $string += $temp 
+        $string | out-file -Filepath $logfile -append
+    }
+    
+    $LogFile = "$LogLocation\$UserAlias $(Get-Date -f yyyy-MM-dd).txt"
+
     $strUser = Get-ADPrincipalGroupMembership -Identity $UserAlias
     $UserPerms = $strUser.name
     $TermDate = Get-Date -DisplayHint Date
-    $LogFile = "C:\QSync\Scripting\PowerShell\Output\Termed User Perms\$UserAlias $(Get-Date -f yyyy-MM-dd).txt"
-    $UserPerms | Out-File $LogFile
+    $DeleteDate = ((Get-Date -DisplayHint Date).AddMonths(3))
+    $DivisionDetails = (Get-ADUser $UserAlias -properties Office).Office
+    Write-Host "<< Logging Permission Sets >>" -ForegroundColor Cyan
     Write-Host "Permissions prior to termination have been recorded to:" -ForegroundColor Yellow
     Write-Host "$LogFile" -ForegroundColor Green
     Write-Host ""
     Write-Host ""
+
+    log "Termination Date - $TermDate"
+    log "Deletion Date - $DeleteDate"
+    log "Full Name - $((Get-ADUser $UserAlias).Name)"
+    log "User Name - $UserAlias"
+    log "Division - $DivisionDetails"
+    log "Permissions Revoked - $UserPerms"
+    
     #End Log Alias and permissions
 
 
@@ -310,7 +350,7 @@ Function UserTerm {
         #Change Password
         Write-Host "<< Changing Password >>" -ForegroundColor Yellow
         Set-ADAccountPassword -Identity $UserAlias -Reset -NewPassword (ConvertTo-SecureString -AsPlainText "T3rm3dU5er$" -Force)
-        Write-Host "Password for $UserAlias has been changed to T3rm3dU5er$" -ForegroundColor Green
+        Write-Host "Password for $UserAlias has been changed to $TermPW" -ForegroundColor Green
         Write-Host ""
         Write-Host ""
         #End Change Password
@@ -344,7 +384,7 @@ Function UserTerm {
 
         #Move user account to Graveyard OU
         Write-Host "<< Move User Account to Graveyard OU >>" -ForegroundColor Yellow
-        Get-ADUser -Identity $UserAlias | Move-ADObject -TargetPath "OU=Disabled Users,OU=ADH Graveyard,DC=adh,DC=local"
+        Get-ADUser -Identity $UserAlias | Move-ADObject -TargetPath $GraveyardOU
         Write-Host "User Account for $UserAlias has been moved to the Graveyard in AD." -ForegroundColor Green
         Write-Host ""
         Write-Host ""
